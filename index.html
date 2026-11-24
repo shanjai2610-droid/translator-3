@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>English → Tamil Dictionary</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600&family=Source+Serif+4:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f2f6f4; --surface: #ffffff; --ink: #1c2b27; --muted: #5d6f69;
+    --accent: #0f6b5a; --line: #d3dedb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111917; --surface: #19241f; --ink: #e6efec; --muted: #93a6a0; --accent: #4fc3a8; --line: #2b3b36; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: "Source Serif 4", Georgia, serif; line-height: 1.6; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 18px 60px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  .search { display: flex; gap: 8px; }
+  input { flex: 1; padding: 12px 14px; font-size: 1.05rem; border: 1px solid var(--line);
+          border-radius: 8px; background: var(--surface); color: var(--ink); font-family: inherit; }
+  input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { padding: 12px 18px; font-size: 1rem; border: 0; border-radius: 8px;
+           background: var(--accent); color: #fff; cursor: pointer; font-family: inherit; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line);
+                 padding: 4px 10px; font-size: .85rem; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+          padding: 18px 20px; margin-top: 18px; }
+  .word { font-size: 1.5rem; font-weight: 600; }
+  .phon { color: var(--muted); margin-left: 8px; }
+  .tamil { font-family: "Noto Sans Tamil", sans-serif; font-size: 1.6rem; color: var(--accent);
+           margin: 8px 0 0; font-weight: 600; }
+  .pos { font-style: italic; color: var(--muted); margin: 14px 0 4px; }
+  .def { margin: 0 0 2px; }
+  .def-ta { font-family: "Noto Sans Tamil", sans-serif; color: var(--accent); margin: 0 0 10px; font-size: .98rem; }
+  .ex { color: var(--muted); margin: 0 0 8px; }
+  .msg { color: var(--muted); margin-top: 18px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>English → Tamil Dictionary</h1>
+  <p class="sub">Type any English word to see its meaning in Tamil.</p>
+
+  <div class="search">
+    <input id="q" type="text" placeholder="e.g. serendipity" autocomplete="off" autofocus>
+    <button id="go">Search</button>
+  </div>
+
+  <div id="out"></div>
+</main>
+
+<script>
+  const q = document.getElementById("q");
+  const out = document.getElementById("out");
+
+  // Translate English -> Tamil (MyMemory free API, no key needed)
+  async function toTamil(text) {
+    try {
+      const url = "https://api.mymemory.translated.net/get?q=" +
+        encodeURIComponent(text) + "&langpair=en|ta";
+      const r = await fetch(url);
+      const d = await r.json();
+      return d.responseData.translatedText || "";
+    } catch { return ""; }
+  }
+
+  // English definitions (Free Dictionary API, no key needed)
+  async function getDefinitions(word) {
+    try {
+      const r = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word));
+      if (!r.ok) return null;
+      return r.json();
+    } catch { return null; }
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function speak(word) {
+    const u = new SpeechSynthesisUtterance(word);
+    u.lang = "en-US";
+    speechSynthesis.speak(u);
+  }
+  window.speak = speak;
+
+  async function search() {
+    const word = q.value.trim().toLowerCase();
+    if (!word) return;
+    out.innerHTML = '<p class="msg">Searching…</p>';
+
+    const [entries, tamilWord] = await Promise.all([getDefinitions(word), toTamil(word)]);
+
+    if (!entries && !tamilWord) {
+      out.innerHTML = '<p class="msg">Could not reach the dictionary. Check your internet connection and try again.</p>';
+      return;
+    }
+
+    let html = '<div class="card">';
+    const phon = entries && entries[0].phonetic ? esc(entries[0].phonetic) : "";
+    html += `<div class="row"><span class="word">${esc(word)}</span><span class="phon">${phon}</span>
+             <button class="ghost" onclick="speak('${esc(word)}')">Listen</button></div>`;
+    html += `<p class="tamil">${esc(tamilWord || "—")}</p>`;
+
+    if (entries) {
+      const jobs = [];
+      entries[0].meanings.slice(0, 2).forEach(m => {
+        m.definitions.slice(0, 2).forEach(d => {
+          jobs.push({ pos: m.partOfSpeech, def: d.definition, ex: d.example });
+        });
+      });
+      const tamilDefs = await Promise.all(jobs.map(j => toTamil(j.def)));
+
+      let lastPos = "";
+      jobs.forEach((j, i) => {
+        if (j.pos !== lastPos) { html += `<p class="pos">${esc(j.pos)}</p>`; lastPos = j.pos; }
+        html += `<p class="def">${esc(j.def)}</p>`;
+        if (tamilDefs[i]) html += `<p class="def-ta">${esc(tamilDefs[i])}</p>`;
+        if (j.ex) html += `<p class="ex">“${esc(j.ex)}”</p>`;
+      });
+    } else {
+      html += '<p class="msg">No English definition found, showing translation only.</p>';
+    }
+
+    html += "</div>";
+    out.innerHTML = html;
+  }
+
+  document.getElementById("go").addEventListener("click", search);
+  q.addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+</script>
+</body>
+</html>
